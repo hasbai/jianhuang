@@ -16,8 +16,8 @@ var threads = int(math.Max(4, float64(runtime.NumCPU())))
 
 func main() {
 	app := &cli.App{
-		Name:  "ipv6-canvas",
-		Usage: "ping ipv6 address to draw on canvas",
+		Name:  "jian huang",
+		Usage: "http benchmark tool",
 		Flags: []cli.Flag{
 			&cli.IntFlag{
 				Name:    "concurrency",
