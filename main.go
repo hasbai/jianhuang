@@ -53,12 +53,10 @@ func main() {
 
 func run() {
 	supervisor := NewSupervisor()
-	go supervisor.Run()
 	for i := 0; i < threads; i++ {
 		supervisor.AddRunner()
 	}
-	fmt.Println("Benchmarking", url)
-	fmt.Println("Concurrency:", threads)
+	go showStat()
 
 	c := make(chan os.Signal)
 	signal.Notify(c, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
@@ -67,6 +65,6 @@ func run() {
 }
 
 func profile() {
-	fmt.Println("start api server...")
+	fmt.Println("profile server started at http://localhost:8080/debug/pprof/")
 	panic(http.ListenAndServe("localhost:8080", nil))
 }

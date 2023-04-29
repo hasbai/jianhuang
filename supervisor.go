@@ -2,6 +2,13 @@ package main
 
 import (
 	"fmt"
+	"github.com/apoorvam/goterminal"
+	"github.com/shirou/gopsutil/cpu"
+	"github.com/shirou/gopsutil/load"
+	"github.com/shirou/gopsutil/mem"
+	netstat "github.com/shirou/gopsutil/net"
+	"math"
+	"os"
 	"time"
 )
 
@@ -22,62 +29,54 @@ func NewSupervisor() *Supervisor {
 }
 
 func (s *Supervisor) AddRunner() {
-	r := NewRunner(s)
+	r := NewRunner()
 	s.runners = append(s.runners, r)
 	go r.Run()
 }
 
-func (s *Supervisor) Run() {
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
+var TerminalWriter = goterminal.New(os.Stdout)
+
+func showStat() {
+	initialNetCounter, _ := netstat.IOCounters(true)
+
 	for {
-		select {
-		case i := <-s.speedCnt:
-			s.speed += i
-		case <-ticker.C:
-			s.time++
-			s.accum += s.speed
-			s.avg = s.accum / s.time
-			s.show()
-			s.speed = 0
-			s.notify()
+		percent, _ := cpu.Percent(time.Second, false)
+		memStat, _ := mem.VirtualMemory()
+		netCounter, _ := netstat.IOCounters(true)
+		loadStat, _ := load.Avg()
+
+		fmt.Fprintf(TerminalWriter, "Benchmarking: %s\n", url)
+		fmt.Fprintf(TerminalWriter, "Concurrency: %d\n", threads)
+
+		fmt.Fprintf(TerminalWriter, "CPU: %.2f%% \n", percent)
+		fmt.Fprintf(TerminalWriter, "Memory: %.2f%% \n", memStat.UsedPercent)
+		fmt.Fprintf(TerminalWriter, "Load: %.2f %.2f %.2f\n", loadStat.Load1, loadStat.Load5, loadStat.Load15)
+		for i := 0; i < len(netCounter); i++ {
+			if netCounter[i].BytesRecv == 0 && netCounter[i].BytesSent == 0 {
+				continue
+			}
+			receivedBytes := netCounter[i].BytesRecv - initialNetCounter[i].BytesRecv
+			sentBytes := netCounter[i].BytesSent - initialNetCounter[i].BytesSent
+			fmt.Fprintf(TerminalWriter, "Nic:%v,Recv %s(%s/s),Send %s(%s/s)\n", netCounter[i].Name,
+				readableBytes(netCounter[i].BytesRecv),
+				readableBytes(receivedBytes),
+				readableBytes(netCounter[i].BytesSent),
+				readableBytes(sentBytes))
 		}
+		initialNetCounter = netCounter
+		TerminalWriter.Clear()
+		_ = TerminalWriter.Print()
+		time.Sleep(1 * time.Millisecond)
 	}
 }
 
-func (s *Supervisor) notify() {
-	for _, r := range s.runners {
-		r.channel <- NOTIFY
-	}
-}
+var sizes = []string{"B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"}
 
-func (s *Supervisor) show() {
-	if s.speed == 0 {
-		return
+func readableBytes(bytes uint64) (expression string) {
+	if bytes == 0 {
+		return "0B"
 	}
-	fmt.Printf(
-		"\rCur: %s/s  Avg: %s/s  Acu: %s   ",
-		toSize(s.speed), toSize(s.avg), toSize(s.accum),
-	)
-}
-
-const (
-	K = 1 << 10
-	M = 1 << 20
-	G = 1 << 30
-	T = 1 << 40
-)
-
-func toSize(size int) string {
-	if size < K {
-		return fmt.Sprintf("%dB", size)
-	} else if size < M {
-		return fmt.Sprintf("%.2fKB", float64(size)/float64(K))
-	} else if size < G {
-		return fmt.Sprintf("%.2fMB", float64(size)/float64(M))
-	} else if size < T {
-		return fmt.Sprintf("%.2fGB", float64(size)/float64(G))
-	} else {
-		return fmt.Sprintf("%.2fTB", float64(size)/float64(T))
-	}
+	i := math.Ilogb(float64(bytes)) / 10
+	pow := 1 << (i * 10)
+	return fmt.Sprintf("%.2f%s", float64(bytes)/float64(pow), sizes[i])
 }
