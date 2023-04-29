@@ -12,7 +12,7 @@ import (
 	"syscall"
 )
 
-var url = "https://teicn.oss-cn-hongkong.aliyuncs.com/teicarmx64.7z"
+var url = ""
 var threads = int(math.Max(4, float64(runtime.NumCPU())))
 
 func main() {
@@ -23,7 +23,7 @@ func main() {
 			&cli.IntFlag{
 				Name:    "concurrency",
 				Aliases: []string{"c"},
-				Usage:   "specify concurrency",
+				Usage:   "specify concurrency, default is cpu cores, minimum is 4",
 			},
 			&cli.BoolFlag{
 				Name:    "debug",
@@ -32,8 +32,10 @@ func main() {
 			},
 		},
 		Action: func(ctx *cli.Context) error {
-			if ctx.Args().First() != "" {
-				url = ctx.Args().First()
+			url = ctx.Args().First()
+			// https://teicn.oss-cn-hongkong.aliyuncs.com/teicarmx64.7z
+			if url == "" {
+				return nil
 			}
 			if ctx.Int("concurrency") > 0 {
 				threads = ctx.Int("concurrency")
