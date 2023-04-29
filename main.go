@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/urfave/cli/v2"
 	"math"
+	"net/http"
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
@@ -24,6 +25,11 @@ func main() {
 				Aliases: []string{"c"},
 				Usage:   "specify concurrency",
 			},
+			&cli.BoolFlag{
+				Name:    "debug",
+				Aliases: []string{"d"},
+				Usage:   "enable debug mode",
+			},
 		},
 		Action: func(ctx *cli.Context) error {
 			if ctx.Args().First() != "" {
@@ -31,6 +37,9 @@ func main() {
 			}
 			if ctx.Int("concurrency") > 0 {
 				threads = ctx.Int("concurrency")
+			}
+			if ctx.Bool("debug") {
+				go profile()
 			}
 			run()
 			return nil
@@ -48,11 +57,14 @@ func run() {
 	}
 	fmt.Println("Benchmarking", url)
 	fmt.Println("Concurrency:", threads)
-	//fmt.Println("start api server...")
-	//panic(http.ListenAndServe("localhost:8080", nil))
 
 	c := make(chan os.Signal)
 	signal.Notify(c, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 	<-c
 	os.Exit(0)
+}
+
+func profile() {
+	fmt.Println("start api server...")
+	panic(http.ListenAndServe("localhost:8080", nil))
 }
