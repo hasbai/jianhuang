@@ -1,82 +1,78 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
-	"github.com/apoorvam/goterminal"
-	"github.com/shirou/gopsutil/cpu"
-	"github.com/shirou/gopsutil/load"
-	"github.com/shirou/gopsutil/mem"
-	netstat "github.com/shirou/gopsutil/net"
-	"math"
-	"os"
-	"time"
+	"net/http"
+	"net/http/httputil"
 )
 
 type Supervisor struct {
-	time     int
-	speed    int
-	accum    int
-	avg      int
-	speedCnt chan int
-	runners  []*Runner
+	url           string
+	isTLS         bool
+	reqData       []byte
+	addr          string
+	contentLength int
 }
 
-func NewSupervisor() *Supervisor {
-	return &Supervisor{
-		speedCnt: make(chan int, 128),
-		runners:  make([]*Runner, 0, 128),
+func NewSupervisor(url string) *Supervisor {
+	s := &Supervisor{
+		url: url,
 	}
+	s.init()
+	return s
 }
 
-func (s *Supervisor) AddRunner() {
-	r := NewRunner()
-	s.runners = append(s.runners, r)
-	go r.Run()
-}
+func (s *Supervisor) init() {
+	fmt.Println("init...")
 
-var TerminalWriter = goterminal.New(os.Stdout)
+	// make request data
+	req, _ := http.NewRequest("GET", s.url, nil)
+	req.Header.Set("User-Agent", UA)
+	s.reqData, _ = httputil.DumpRequestOut(req, false)
 
-func showStat() {
-	initialNetCounter, _ := netstat.IOCounters(true)
+	// set isTLS
+	if req.URL.Scheme == "https" {
+		s.isTLS = true
+	} else if req.URL.Scheme == "http" {
+		s.isTLS = false
+	} else {
+		panic("invalid scheme")
+	}
 
-	for {
-		percent, _ := cpu.Percent(time.Second, false)
-		memStat, _ := mem.VirtualMemory()
-		netCounter, _ := netstat.IOCounters(true)
-		loadStat, _ := load.Avg()
-
-		fmt.Fprintf(TerminalWriter, "Benchmarking: %s\n", url)
-		fmt.Fprintf(TerminalWriter, "Concurrency: %d\n", threads)
-
-		fmt.Fprintf(TerminalWriter, "CPU: %.2f%% \n", percent)
-		fmt.Fprintf(TerminalWriter, "Memory: %.2f%% \n", memStat.UsedPercent)
-		fmt.Fprintf(TerminalWriter, "Load: %.2f %.2f %.2f\n", loadStat.Load1, loadStat.Load5, loadStat.Load15)
-		for i := 0; i < len(netCounter); i++ {
-			if netCounter[i].BytesRecv == 0 && netCounter[i].BytesSent == 0 {
-				continue
-			}
-			receivedBytes := netCounter[i].BytesRecv - initialNetCounter[i].BytesRecv
-			sentBytes := netCounter[i].BytesSent - initialNetCounter[i].BytesSent
-			fmt.Fprintf(TerminalWriter, "Nic:%v,Recv %s(%s/s),Send %s(%s/s)\n", netCounter[i].Name,
-				readableBytes(netCounter[i].BytesRecv),
-				readableBytes(receivedBytes),
-				readableBytes(netCounter[i].BytesSent),
-				readableBytes(sentBytes))
+	// set addr
+	port := req.URL.Port()
+	if port == "" {
+		if s.isTLS {
+			port = "443"
+		} else {
+			port = "80"
 		}
-		initialNetCounter = netCounter
-		TerminalWriter.Clear()
-		_ = TerminalWriter.Print()
-		time.Sleep(1 * time.Millisecond)
+	}
+	s.addr = req.URL.Hostname() + ":" + port
+
+	// set contentLength
+	s.contentLength = s.getContentLength()
+}
+
+func (s *Supervisor) Run(threads int) {
+	for i := 0; i < threads; i++ {
+		runner := NewRunner(s)
+		go runner.Run()
 	}
 }
 
-var sizes = []string{"B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"}
-
-func readableBytes(bytes uint64) (expression string) {
-	if bytes == 0 {
-		return "0B"
+// getContentLength returns the length of the whole response
+func (s *Supervisor) getContentLength() int {
+	resp, err := http.Get(s.url)
+	if err != nil {
+		panic(err.Error())
 	}
-	i := math.Ilogb(float64(bytes)) / 10
-	pow := 1 << (i * 10)
-	return fmt.Sprintf("%.2f%s", float64(bytes)/float64(pow), sizes[i])
+	if resp.StatusCode >= 400 {
+		panic("request failed")
+	}
+
+	buf := bytes.NewBuffer(nil)
+	_ = resp.Write(buf)
+	return buf.Len()
 }

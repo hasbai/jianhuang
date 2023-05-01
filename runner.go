@@ -2,102 +2,112 @@ package main
 
 import (
 	"crypto/tls"
+	"errors"
 	"io"
-	"log"
-	"net/http"
-	"net/http/httputil"
-	"strconv"
+	"net"
 )
 
 type Runner struct {
-	buf       []byte
-	readBytes int
-	client    *http.Client
+	supervisor *Supervisor
+	buf        []byte
+	conn       Conn
 }
 
-const bufSize = 1500
+const bufSize = 1 << 20
 
-func NewRunner() *Runner {
+func NewRunner(s *Supervisor) *Runner {
 	return &Runner{
-		buf:    make([]byte, bufSize),
-		client: &http.Client{},
+		buf:        make([]byte, bufSize),
+		supervisor: s,
 	}
 }
 
-func (r *Runner) Run() {
-	resp := r.makeRequest()
+func (r *Runner) run() {
+	defer r.conn.Close()
+	err := r.dial()
+	if err != nil {
+		panic(err.Error())
+	}
+	var n, length int
 	for {
-		n, err := resp.Body.Read(r.buf)
-		if err == nil {
-			r.readBytes += n
-		} else {
-			_ = resp.Body.Close()
+		n, err = r.conn.Read(r.buf)
+		length += n
+		if length >= r.supervisor.contentLength {
+			return
+		}
+		if err != nil {
 			if err == io.EOF {
-				resp = r.makeRequest()
+				return
 			} else {
-				panic("resp.Body.Read() error: " + err.Error())
+				panic("Read error: " + err.Error())
 			}
 		}
 	}
 }
 
-func (r *Runner) makeRequest() *http.Response {
-	resp, err := r.client.Get(url)
-	if err != nil {
-		panic("http.Get() error: " + err.Error())
+func (r *Runner) Run() {
+	for {
+		r.run()
 	}
-	return resp
 }
 
-func request() {
-	conf := &tls.Config{
-		//InsecureSkipVerify: true,
-	}
+type Conn struct {
+	netConn net.Conn
+	conn    *tls.Conn
+}
 
-	conn, err := tls.Dial("tcp", "teicn.oss-cn-hongkong.aliyuncs.com:443", conf)
-	if err != nil {
-		log.Println(err)
-		return
+// Read avoid tls decryption to get better performance
+func (c *Conn) Read(b []byte) (n int, err error) {
+	return c.netConn.Read(b)
+}
+
+func (c *Conn) Write(b []byte) (n int, err error) {
+	if c.conn != nil {
+		return c.conn.Write(b)
 	}
-	defer func(conn *tls.Conn) {
-		err := conn.Close()
+	return c.netConn.Write(b)
+}
+
+func (c *Conn) Close() {
+	if c.conn != nil {
+		err := c.conn.Close()
 		if err != nil {
-			panic("close conn error: " + err.Error())
+			panic("close Conn error: " + err.Error())
 		}
-	}(conn)
-
-	req, _ := http.NewRequest("GET", "https://teicn.oss-cn-hongkong.aliyuncs.com/teicarmx64.7z", nil)
-	req.Header.Set("User-Agent", UA)
-	reqData, _ := httputil.DumpRequestOut(req, false)
-
-	n, err := conn.Write(reqData)
-	if err != nil {
-		log.Println(n, err)
-		return
+	} else {
+		if c.netConn != nil {
+			err := c.netConn.Close()
+			if err != nil {
+				panic("close Conn error: " + err.Error())
+			}
+		}
 	}
-
-	buf := make([]byte, 1024)
-	n, err = conn.NetConn().Read(buf)
-	if err != nil {
-		log.Println(n, err)
-		return
-	}
-
-	println(string(buf[:n]))
 }
 
-func getReqDataAndAddr(url string) ([]byte, string) {
-	req, _ := http.NewRequest("GET", url, nil)
-	req.Header.Set("User-Agent", UA)
-	reqData, _ := httputil.DumpRequestOut(req, false)
-	var port int
-	if req.URL.Scheme == "https" {
-		port = 443
-	} else if req.URL.Scheme == "http" {
-		port = 80
+func (r *Runner) dial() error {
+	if r.supervisor.isTLS {
+		conn, err := tls.Dial("tcp", r.supervisor.addr, &tls.Config{})
+		if err != nil {
+			return errors.New("dial error: " + err.Error())
+		}
+		r.conn = Conn{
+			conn:    conn,
+			netConn: conn.NetConn(),
+		}
 	} else {
-		panic("invalid scheme")
+		conn, err := net.Dial("tcp", r.supervisor.addr)
+		if err != nil {
+			return errors.New("dial error: " + err.Error())
+		}
+		r.conn = Conn{
+			conn:    nil,
+			netConn: conn,
+		}
 	}
-	addr := req.URL.Hostname() + ":" + strconv.Itoa(port)
-	return reqData, addr
+
+	_, err := r.conn.Write(r.supervisor.reqData)
+	if err != nil {
+		return errors.New("write error: " + err.Error())
+	}
+	return nil
 }

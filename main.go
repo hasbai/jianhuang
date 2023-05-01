@@ -14,9 +14,6 @@ import (
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Safari/537.36"
 
-var url = ""
-var threads = int(math.Max(4, float64(runtime.NumCPU())))
-
 func main() {
 	app := &cli.App{
 		Name:  "jian huang",
@@ -34,18 +31,19 @@ func main() {
 			},
 		},
 		Action: func(ctx *cli.Context) error {
-			url = ctx.Args().First()
+			url := ctx.Args().First()
 			// https://teicn.oss-cn-hongkong.aliyuncs.com/teicarmx64.7z
 			if url == "" {
 				return nil
 			}
+			threads := int(math.Max(4, float64(runtime.NumCPU())))
 			if ctx.Int("concurrency") > 0 {
 				threads = ctx.Int("concurrency")
 			}
 			if ctx.Bool("debug") {
 				go profile()
 			}
-			run()
+			run(url, threads)
 			return nil
 		},
 	}
@@ -53,12 +51,11 @@ func main() {
 	panic(app.Run(os.Args))
 }
 
-func run() {
-	supervisor := NewSupervisor()
-	for i := 0; i < threads; i++ {
-		supervisor.AddRunner()
-	}
-	go showStat()
+func run(url string, threads int) {
+	s := NewSupervisor(url)
+	s.Run(threads)
+
+	go showStat(url, threads)
 
 	c := make(chan os.Signal)
 	signal.Notify(c, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
