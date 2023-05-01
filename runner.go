@@ -3,8 +3,10 @@ package main
 import (
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"io"
 	"net"
+	"time"
 )
 
 type Runner struct {
@@ -23,10 +25,12 @@ func NewRunner(s *Supervisor) *Runner {
 }
 
 func (r *Runner) run() {
-	defer r.conn.Close()
-	err := r.dial()
+	err := r.request()
 	if err != nil {
-		panic(err.Error())
+		fmt.Printf("dial error: %s, wait 3 seconds...", err.Error())
+		r.conn.Close()
+		time.Sleep(3 * time.Second)
+		return
 	}
 	var n, length int
 	for {
@@ -36,19 +40,55 @@ func (r *Runner) run() {
 			return
 		}
 		if err != nil {
-			if err == io.EOF {
-				return
-			} else {
-				panic("Read error: " + err.Error())
+			if err != io.EOF {
+				fmt.Printf("Read error:" + err.Error())
+				r.conn.Close()
 			}
+			return
 		}
 	}
 }
 
 func (r *Runner) Run() {
+	defer r.conn.Close()
 	for {
 		r.run()
 	}
+}
+
+func (r *Runner) request() error {
+	if r.conn.netConn == nil {
+		err := r.dial()
+		if err != nil {
+			return err
+		}
+	}
+	_, err := r.conn.Write(r.supervisor.reqData)
+	return err
+}
+
+func (r *Runner) dial() error {
+	if r.supervisor.isTLS {
+		conn, err := tls.Dial("tcp", r.supervisor.addr, &tls.Config{})
+		if err != nil {
+			return errors.New("dial error: " + err.Error())
+		}
+		r.conn = Conn{
+			conn:    conn,
+			netConn: conn.NetConn(),
+		}
+	} else {
+		conn, err := net.Dial("tcp", r.supervisor.addr)
+		if err != nil {
+			return errors.New("dial error: " + err.Error())
+		}
+		r.conn = Conn{
+			conn:    nil,
+			netConn: conn,
+		}
+	}
+
+	return nil
 }
 
 type Conn struct {
@@ -82,32 +122,6 @@ func (c *Conn) Close() {
 			}
 		}
 	}
-}
-
-func (r *Runner) dial() error {
-	if r.supervisor.isTLS {
-		conn, err := tls.Dial("tcp", r.supervisor.addr, &tls.Config{})
-		if err != nil {
-			return errors.New("dial error: " + err.Error())
-		}
-		r.conn = Conn{
-			conn:    conn,
-			netConn: conn.NetConn(),
-		}
-	} else {
-		conn, err := net.Dial("tcp", r.supervisor.addr)
-		if err != nil {
-			return errors.New("dial error: " + err.Error())
-		}
-		r.conn = Conn{
-			conn:    nil,
-			netConn: conn,
-		}
-	}
-
-	_, err := r.conn.Write(r.supervisor.reqData)
-	if err != nil {
-		return errors.New("write error: " + err.Error())
-	}
-	return nil
+	c.conn = nil
+	c.netConn = nil
 }

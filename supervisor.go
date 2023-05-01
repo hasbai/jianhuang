@@ -29,6 +29,7 @@ func (s *Supervisor) init() {
 	// make request data
 	req, _ := http.NewRequest("GET", s.url, nil)
 	req.Header.Set("User-Agent", UA)
+	req.Header.Set("Connection", "keep-alive")
 	s.reqData, _ = httputil.DumpRequestOut(req, false)
 
 	// set isTLS
