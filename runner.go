@@ -1,8 +1,12 @@
 package main
 
 import (
+	"crypto/tls"
 	"io"
+	"log"
 	"net/http"
+	"net/http/httputil"
+	"strconv"
 )
 
 type Runner struct {
@@ -43,4 +47,57 @@ func (r *Runner) makeRequest() *http.Response {
 		panic("http.Get() error: " + err.Error())
 	}
 	return resp
+}
+
+func request() {
+	conf := &tls.Config{
+		//InsecureSkipVerify: true,
+	}
+
+	conn, err := tls.Dial("tcp", "teicn.oss-cn-hongkong.aliyuncs.com:443", conf)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+	defer func(conn *tls.Conn) {
+		err := conn.Close()
+		if err != nil {
+			panic("close conn error: " + err.Error())
+		}
+	}(conn)
+
+	req, _ := http.NewRequest("GET", "https://teicn.oss-cn-hongkong.aliyuncs.com/teicarmx64.7z", nil)
+	req.Header.Set("User-Agent", UA)
+	reqData, _ := httputil.DumpRequestOut(req, false)
+
+	n, err := conn.Write(reqData)
+	if err != nil {
+		log.Println(n, err)
+		return
+	}
+
+	buf := make([]byte, 1024)
+	n, err = conn.NetConn().Read(buf)
+	if err != nil {
+		log.Println(n, err)
+		return
+	}
+
+	println(string(buf[:n]))
+}
+
+func getReqDataAndAddr(url string) ([]byte, string) {
+	req, _ := http.NewRequest("GET", url, nil)
+	req.Header.Set("User-Agent", UA)
+	reqData, _ := httputil.DumpRequestOut(req, false)
+	var port int
+	if req.URL.Scheme == "https" {
+		port = 443
+	} else if req.URL.Scheme == "http" {
+		port = 80
+	} else {
+		panic("invalid scheme")
+	}
+	addr := req.URL.Hostname() + ":" + strconv.Itoa(port)
+	return reqData, addr
 }
